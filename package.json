@@ -1,0 +1,16 @@
+{
+  "name": "@xmlvalid/cli",
+  "version": "1.0.0",
+  "description": "Validate XML against XSD, DTD and RelaxNG schemas from the command line and CI, with the xmlvalid.com API.",
+  "keywords": ["xml", "xsd", "dtd", "relaxng", "validation", "validator", "ci"],
+  "homepage": "https://xmlvalid.com/docs/ci",
+  "repository": { "type": "git", "url": "git+https://github.com/xmlvalid/cli.git" },
+  "bugs": "https://github.com/xmlvalid/cli/issues",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "xmlvalid": "bin/xmlvalid.mjs" },
+  "exports": "./bin/xmlvalid.mjs",
+  "files": ["bin", "README.md"],
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test test/*.test.mjs" }
+}

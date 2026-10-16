@@ -1,0 +1,8 @@
+# pre-commit (https://pre-commit.com) hook. Needs XMLVALID_API_KEY in the environment.
+- id: xmlvalid
+  name: Validate XML with xmlvalid
+  description: Validates staged XML files through the xmlvalid.com API. Pass the schema in args, e.g. ["--schema", "atom-1.0"].
+  entry: xmlvalid validate
+  language: node
+  files: \.(xml|atom|rss|gpx|kml|svg|xhtml)$
+  require_serial: true
