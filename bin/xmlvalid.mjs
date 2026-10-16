@@ -9,7 +9,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { fromApi, reportHtml } from './report.mjs';
 
-export const VERSION = '1.0.0';
+export const VERSION = '1.0.1';
 
 const DEFAULT_API = 'https://xmlvalid.com/api/v1';
 

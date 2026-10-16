@@ -1,8 +1,8 @@
 {
   "name": "@xmlvalid/cli",
-  "version": "1.0.0",
-  "description": "Validate XML against XSD, DTD and RelaxNG schemas from the command line and CI, with the xmlvalid.com API.",
-  "keywords": ["xml", "xsd", "dtd", "relaxng", "validation", "validator", "ci"],
+  "version": "1.0.1",
+  "description": "Validate XML and e-invoices from the command line and CI: XSD, DTD, RelaxNG and Schematron business rules (EN 16931, Peppol, XRechnung, Factur-X) with the xmlvalid.com API.",
+  "keywords": ["xml", "xsd", "dtd", "relaxng", "schematron", "validation", "validator", "ci", "e-invoice", "einvoicing", "en16931", "peppol", "xrechnung", "zugferd", "factur-x", "ubl"],
   "homepage": "https://xmlvalid.com/docs/ci",
   "repository": { "type": "git", "url": "git+https://github.com/xmlvalid/cli.git" },
   "bugs": "https://github.com/xmlvalid/cli/issues",

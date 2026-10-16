@@ -1,14 +1,17 @@
 # @xmlvalid/cli
 
-Validate XML files against XSD 1.0, DTD and RelaxNG schemas from your terminal, a
-Git hook or CI, using the [xmlvalid.com](https://xmlvalid.com) API. No dependencies;
-Node.js 20 or newer.
+Validate XML files and e-invoices from your terminal, a Git hook or CI with the
+[xmlvalid.com](https://xmlvalid.com) API: XSD 1.0, DTD and RelaxNG schemas, your own
+Schematron rules, and the business rules of EN 16931, Peppol BIS and PINT, XRechnung,
+Factur-X / ZUGFeRD and national e-invoicing formats from the
+[schema catalog](https://xmlvalid.com/schemas). No dependencies; Node.js 20 or newer.
 
 ```sh
 npm install -g @xmlvalid/cli
 export XMLVALID_API_KEY=xv_…        # https://xmlvalid.com/dashboard/api
 
 xmlvalid validate invoices/*.xml --schema ubl-2.1-invoice
+xmlvalid validate "out/**/*.xml" --schema auto          # Peppol, XRechnung, Factur-X…
 xmlvalid validate "feeds/**/*.atom" --schema atom-1.0 --format github
 xmlvalid validate order.xml --schema-file schemas/order.xsd
 xmlvalid validate --url https://example.com/sitemap.xml --schema sitemap-0.9
