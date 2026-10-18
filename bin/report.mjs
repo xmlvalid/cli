@@ -194,6 +194,11 @@ function apiDocument(name, validation) {
     };
 }
 
+/** "Peppol BIS Billing 3.0 rules 3.0.21": a rule set's name with its release, once. */
+function ruleSetLabel(set) {
+    return set.name.includes(set.version) ? set.name : `${set.name} ${set.version}`;
+}
+
 /**
  * The report of API validations (GET /api/v1/validations/{id}), each named by
  * its file or URL. An archive lists its documents as "orders.zip!a.xml".
@@ -209,7 +214,14 @@ export function fromApi(entries, { origin, generated }) {
     const passed = documents.filter((d) => d.verdict === 'valid' || d.verdict === 'warnings').length;
     const skipped = documents.filter((d) => d.verdict === null).length;
     const schema = entries.map(({ validation }) => validation.schema).find(Boolean) ?? null;
-    const rules = entries.map(({ validation }) => validation.rules?.name).find(Boolean) ?? null;
+    // The catalog rule sets with their releases (an archive's items carry their own), then rules of the caller's own.
+    const rules = [];
+    for (const { validation } of entries) {
+        const sets = [...(validation.rule_sets ?? []), ...(validation.result?.items ?? []).flatMap((item) => item.rule_sets ?? [])];
+        for (const label of [...sets.map(ruleSetLabel), ...(validation.rules?.name ? [validation.rules.name] : [])]) {
+            if (!rules.includes(label)) rules.push(label);
+        }
+    }
 
     return {
         title: batch ? plural(documents.length, 'document', 'documents') : documents[0]?.name ?? 'Validation',
@@ -217,7 +229,7 @@ export function fromApi(entries, { origin, generated }) {
         origin,
         via: 'api',
         schema: schema ? (schema.kind === 'doctype' ? 'The document\'s own DOCTYPE' : `${schema.name ?? schema.catalog ?? schema.saved} · ${String(schema.kind).toUpperCase()}`) : null,
-        rules,
+        rules: rules.length ? rules.join(' · ') : null,
         documents,
         summary: batch ? { total: documents.length, passed, failed: documents.length - passed - skipped, skipped } : null,
     };

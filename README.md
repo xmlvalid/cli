@@ -37,6 +37,7 @@ the PDF around it are listed as `[PDF-…]` findings.
 | `-s, --schema <name>` | a catalog slug (`atom-1.0`), a saved schema (`my-12`), or `auto` for the profile each e-invoice names (Peppol, XRechnung, French, KSeF…) |
 | `--schema-file <path>` | one XSD, DTD or RelaxNG file sent with each document |
 | `--rules <path>` | your own Schematron (`.sch`) file, run after the schema check; findings show their rule id |
+| `--rules-version <set@version>` | fail (exit 2) when a catalog profile's business rules are at another release, such as `peppol-bis-3-ubl@3.0.21`; repeat for several. The rule sets and releases used are printed under the summary |
 | `--doctype` | validate against each document's own DOCTYPE |
 | `--url <address>` | a document at a public URL (repeatable) |
 | `-f, --format <format>` | `text`, `json` or `github` (annotations and a job summary) |

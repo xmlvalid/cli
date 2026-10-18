@@ -9,7 +9,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { fromApi, reportHtml } from './report.mjs';
 
-export const VERSION = '1.0.1';
+export const VERSION = '1.1.0';
 
 const DEFAULT_API = 'https://xmlvalid.com/api/v1';
 
@@ -30,6 +30,9 @@ Options for validate:
       --doctype             validate against each document's own DOCTYPE
       --rules <path>        your own Schematron (.sch) rules, run after the schema;
                             files it includes are sent along
+      --rules-version <set@version>
+                            fail (exit 2) unless a catalog rule set runs this
+                            release, such as peppol-bis-3-ubl@3.0.21 (repeatable)
       --url <address>       validate a document at a public URL (repeatable)
   -f, --format <format>     text (default), json or github
       --fail-on-warnings    exit 1 when a document has warnings
@@ -58,12 +61,13 @@ class CliError extends Error {
 
 /** Parses argv into { command, args, options }. */
 export function parseArgs(argv) {
-    const options = { url: [], format: 'text', concurrency: 4, maxErrors: 20 };
+    const options = { url: [], rulesVersion: [], format: 'text', concurrency: 4, maxErrors: 20 };
     const args = [];
     const takes = {
         '-s': 'schema', '--schema': 'schema',
         '--schema-file': 'schemaFile',
         '--rules': 'rules',
+        '--rules-version': 'rulesVersion',
         '--url': 'url',
         '-f': 'format', '--format': 'format',
         '-j': 'concurrency', '--concurrency': 'concurrency',
@@ -95,8 +99,8 @@ export function parseArgs(argv) {
                 throw new CliError(`${arg} needs a value.`);
             }
             const key = takes[arg];
-            if (key === 'url') {
-                options.url.push(value);
+            if (key === 'url' || key === 'rulesVersion') {
+                options[key].push(value);
             } else if (key === 'concurrency' || key === 'maxErrors') {
                 options[key] = Number.parseInt(value, 10);
                 if (!Number.isInteger(options[key]) || options[key] < (key === 'maxErrors' ? 0 : 1)) {
@@ -278,7 +282,7 @@ export class Api {
         if (!response.ok) {
             const message = json?.error?.message ?? `HTTP ${response.status}`;
             const code = json?.error?.code;
-            const fatal = ['unauthenticated', 'quota_exceeded', 'unknown_schema', 'invalid_schema', 'invalid_rules', 'too_large', 'invalid_request', 'invalid_url', 'missing_document'];
+            const fatal = ['unauthenticated', 'quota_exceeded', 'unknown_schema', 'invalid_schema', 'invalid_rules', 'too_large', 'invalid_request', 'invalid_url', 'missing_document', 'rules_version_mismatch'];
             throw new CliError(message, code && fatal.includes(code) ? EXIT.usage : EXIT.failure);
         }
 
@@ -286,7 +290,7 @@ export class Api {
     }
 
     /** Sends one document and waits for the finished validation. */
-    async validate({ file, url, schema, schemaFile, doctype, rules }, { pollEvery = 2000, timeout = 20 * 60_000 } = {}) {
+    async validate({ file, url, schema, schemaFile, doctype, rules, rulesVersion }, { pollEvery = 2000, timeout = 20 * 60_000 } = {}) {
         const form = new FormData();
         if (file) {
             form.append('document', await openAsBlob(file), path.basename(file));
@@ -300,6 +304,7 @@ export class Api {
             form.append('rules_file[]', await openAsBlob(rule.file), path.basename(rule.file));
             form.append('rules_path[]', rule.path);
         }
+        for (const pin of rulesVersion ?? []) form.append('rules_version[]', pin);
         form.append('wait', '30');
 
         let { json, location } = await this.request('POST', '/validations', form);
@@ -419,12 +424,27 @@ export function render(item, validation, options) {
     return lines;
 }
 
+/** The catalog rule sets that ran, with their releases, each once ("Peppol BIS Billing 3.0 rules 3.0.21"). */
+export function ruleSets(validations) {
+    const labels = [];
+    for (const v of validations) {
+        for (const set of [...(v.rule_sets ?? []), ...(v.result?.items ?? []).flatMap((item) => item.rule_sets ?? [])]) {
+            const label = set.name.includes(set.version) ? set.name : `${set.name} ${set.version}`;
+            if (!labels.includes(label)) labels.push(label);
+        }
+    }
+
+    return labels;
+}
+
 /** A Markdown table for the GitHub job summary. */
 function jobSummary(items, validations, failOnWarnings) {
     const rows = items.map((item, i) => `| ${passes(validations[i], failOnWarnings) ? '✅' : '❌'} | \`${item.file ?? item.url}\` | ${describe(validations[i])} |`);
     const failed = validations.filter((v) => !passes(v, failOnWarnings)).length;
 
-    return [`### xmlvalid: ${failed === 0 ? 'all valid' : `${plural(failed, 'document')} failed`}`, '', '| | Document | Result |', '|---|---|---|', ...rows, ''].join('\n');
+    const sets = ruleSets(validations);
+
+    return [`### xmlvalid: ${failed === 0 ? 'all valid' : `${plural(failed, 'document')} failed`}`, '', '| | Document | Result |', '|---|---|---|', ...rows, '', ...(sets.length ? [`Rules: ${sets.join(' · ')}`, ''] : [])].join('\n');
 }
 
 async function validateCommand(args, options, api, out, err = out) {
@@ -443,7 +463,7 @@ async function validateCommand(args, options, api, out, err = out) {
     }
 
     const validations = await pool(items, options.concurrency, async (item) => {
-        const validation = await api.validate({ ...item, schema: options.schema, schemaFile: options.schemaFile, doctype: options.doctype, rules });
+        const validation = await api.validate({ ...item, schema: options.schema, schemaFile: options.schemaFile, doctype: options.doctype, rules, rulesVersion: options.rulesVersion });
         if (options.format !== 'json') {
             out(render(item, validation, options).join('\n'));
         }
@@ -456,6 +476,8 @@ async function validateCommand(args, options, api, out, err = out) {
     } else {
         const failed = validations.filter((v) => !passes(v, options.failOnWarnings)).length;
         out(`\n${plural(items.length, 'document')}: ${items.length - failed} passed, ${failed} failed.`);
+        const sets = ruleSets(validations);
+        if (sets.length) out(`Rules: ${sets.join(' · ')}`);
     }
 
     if (options.report) {

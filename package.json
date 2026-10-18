@@ -1,6 +1,6 @@
 {
   "name": "@xmlvalid/cli",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Validate XML and e-invoices from the command line and CI: XSD, DTD, RelaxNG and Schematron business rules (EN 16931, Peppol, XRechnung, Factur-X) with the xmlvalid.com API.",
   "keywords": ["xml", "xsd", "dtd", "relaxng", "schematron", "validation", "validator", "ci", "e-invoice", "einvoicing", "en16931", "peppol", "xrechnung", "zugferd", "factur-x", "ubl"],
   "homepage": "https://xmlvalid.com/docs/ci",

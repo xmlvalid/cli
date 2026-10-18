@@ -334,3 +334,32 @@ test('shares one report link for the whole run, and carries on without one', asy
         await rm(dir, { recursive: true, force: true });
     }
 });
+
+test('pins rule set releases and names the ones that ran', async () => {
+    const dir = await workspace({ 'invoice.xml': '<Invoice/>' });
+    const sets = [{ key: 'en16931-ubl-1.3.16', name: 'EN 16931 rules 1.3.16 (UBL)', version: '1.3.16' }, { key: 'peppol-bis-3-ubl', name: 'Peppol BIS Billing 3.0 rules', version: '3.0.21' }];
+    const api = await fakeApi(() => [200, { ...done('val_1', valid), rule_sets: sets }]);
+    try {
+        const { code, out } = await run(['validate', 'invoice.xml', '-s', 'peppol-bis-3-invoice', '--rules-version', 'peppol-bis-3-ubl@3.0.21', '--rules-version=en16931-ubl-1.3.16@1.3.16'], { base: api.base, cwd: dir });
+
+        assert.equal(code, 0);
+        assert.match(out, /Rules: EN 16931 rules 1\.3\.16 \(UBL\) · Peppol BIS Billing 3\.0 rules 3\.0\.21/);
+        assert.match(api.seen[0].body, /name="rules_version\[\]"\r\n\r\npeppol-bis-3-ubl@3\.0\.21\r\n/);
+        assert.match(api.seen[0].body, /name="rules_version\[\]"\r\n\r\nen16931-ubl-1\.3\.16@1\.3\.16\r\n/);
+    } finally {
+        await api.close();
+        await rm(dir, { recursive: true });
+    }
+});
+
+test('stops with exit 2 when a pinned rule set has moved on', async () => {
+    const api = await fakeApi(() => [409, { error: { code: 'rules_version_mismatch', message: 'Peppol BIS Billing 3.0 rules runs release 3.0.22 now, not 3.0.21.', rule_set: 'peppol-bis-3-ubl', pinned: '3.0.21', current: '3.0.22' } }]);
+    try {
+        const { code, err } = await run(['validate', '--url', 'https://example.com/a.xml', '--rules-version', 'peppol-bis-3-ubl@3.0.21'], { base: api.base });
+
+        assert.equal(code, 2);
+        assert.match(err, /runs release 3\.0\.22 now/);
+    } finally {
+        await api.close();
+    }
+});
