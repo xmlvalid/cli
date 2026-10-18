@@ -5,8 +5,7 @@
 #     Organization or user: xmlvalid    Repository: cli
 #     Workflow filename: publish.yml    Environment: (empty)
 #     Permissions: npm stage publish
-# A run stages the version; it goes live once approved with 2FA on npmjs.com (the package's
-# staged versions) or with `npm stage approve <stage-id>`. `npm stage` needs npm 12.
+# A run stages the version; it goes live once approved with 2FA on npmjs.com (Staged Packages) or with `npm stage approve <stage-id>`. `npm stage` needs npm 12.
 #
 # Releasing: bump "version" in package.json and VERSION in bin/xmlvalid.mjs, commit, then
 #   git tag v1.0.2 && git push origin v1.0.2
