@@ -9,7 +9,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { fromApi, reportHtml } from './report.mjs';
 
-export const VERSION = '1.1.0';
+export const VERSION = '1.2.0';
 
 const DEFAULT_API = 'https://xmlvalid.com/api/v1';
 
@@ -414,6 +414,7 @@ export function render(item, validation, options) {
             const where = d.line > 0 ? `:${d.line}${d.column > 0 ? `:${d.column}` : ''}` : '';
             lines.push(`    ${label}${where}  ${d.kind === 'warning' ? 'warning: ' : ''}${d.rule ? `[${d.rule}] ` : ''}${d.message}`);
             if (d.message_en) lines.push(`      in English: ${d.message_en}`);
+            if (d.path) lines.push(`      at ${d.path}`);
         }
         const total = (validation.result?.errors_total ?? 0) + (validation.result?.warnings_total ?? 0);
         if (total > shown.length && shown.length > 0) {

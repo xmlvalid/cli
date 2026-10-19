@@ -264,6 +264,15 @@ test('adds the English of a rule written in another language', () => {
     assert.match(render({ file: 'r.xml' }, done('v', croatian), { format: 'github', maxErrors: 5 })[0], /OIB operatera \(HR-BT-5\) \(The invoice must contain/);
 });
 
+test('says where a business rule fired', () => {
+    const fired = { ...invalid, errors_total: 1, errors: [{ line: 139, column: 0, level: 'error', type: 'schematron', rule: 'BR-CO-16', path: '/Invoice/cac:LegalMonetaryTotal', message: 'Amount due' }] };
+
+    assert.deepEqual(render({ file: 'i.xml' }, done('v', fired), { format: 'text', maxErrors: 5 }).slice(1), [
+        '    i.xml:139  [BR-CO-16] Amount due',
+        '      at /Invoice/cac:LegalMonetaryTotal',
+    ]);
+});
+
 test('lists the documents of an archive under it', () => {
     const archive = {
         valid: false, outcome: 'invalid', errors_total: 2, warnings_total: 0, errors: [], warnings: [],
