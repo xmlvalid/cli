@@ -405,3 +405,53 @@ test('stops with exit 2 when a pinned rule set has moved on', async () => {
         await api.close();
     }
 });
+
+test('writes an e-invoice from JSON, saves it and prints its check', async () => {
+    const dir = await workspace({ 'invoice.json': JSON.stringify({ invoice: { profile: 'xrechnung', number: 'RE-1' } }) });
+    const api = await fakeApi(async (req) => {
+        if (req.method === 'POST') {
+            return [200, {
+                ...done('inv1', valid),
+                document: { source: 'invoice', name: 'RE-1.xml' },
+                schema: { catalog: 'xrechnung-3-ubl' },
+                invoice: { profile: 'xrechnung', syntax: 'ubl', currency: 'EUR', totals: { payable: '119.00' }, ignored: ['colour'] },
+                rule_sets: [{ key: 'xrechnung', name: 'XRechnung', version: '3.0.2' }],
+                links: { self: '/api/v1/validations/inv1', document: `${base}/validations/inv1/document` },
+            }];
+        }
+
+        return [200, '<Invoice/>'];
+    });
+    const base = api.base;
+    try {
+        const { code, out } = await run(['invoice', 'invoice.json'], { base, cwd: dir });
+        assert.equal(code, 0);
+        assert.match(out, /✓ RE-1\.xml {2}valid/);
+        assert.match(out, /xrechnung UBL, xrechnung-3-ubl, 119\.00 EUR payable/);
+        assert.match(out, /fields not used: colour/);
+        assert.equal(await readFile(path.join(dir, 'RE-1.xml'), 'utf8'), '<Invoice/>');
+        const sent = JSON.parse(api.seen[0].body);
+        assert.deepEqual(sent.invoice, { profile: 'xrechnung', number: 'RE-1' });
+        assert.equal(sent.format, 'xml');
+    } finally {
+        await api.close();
+        await rm(dir, { recursive: true, force: true });
+    }
+});
+
+test('names what kept an invoice from being written', async () => {
+    const dir = await workspace({ 'invoice.json': JSON.stringify({ profile: 'zugferd', lines: [] }) });
+    const api = await fakeApi(async () => [200, {
+        ...done('inv2', { valid: false, outcome: 'input', errors_total: 1, warnings_total: 0, warnings: [], errors: [{ line: 0, level: 'fatal', type: 'io', message: 'An invoice needs at least one line.' }] }),
+        invoice: null,
+    }]);
+    try {
+        const { code, out } = await run(['invoice', 'invoice.json', '--pdf'], { base: api.base, cwd: dir });
+        assert.equal(code, 2);
+        assert.match(out, /at least one line/);
+        assert.equal(JSON.parse(api.seen[0].body).format, 'pdf');
+    } finally {
+        await api.close();
+        await rm(dir, { recursive: true, force: true });
+    }
+});

@@ -55,6 +55,25 @@ Globs support `*`, `**`, `?` and `{a,b}`; quote them so the shell leaves them al
 Exit codes: `0` all valid, `1` a document is invalid, `2` a usage, schema or quota
 problem, `3` a network or server error.
 
+## Writing an e-invoice
+
+`xmlvalid invoice <invoice.json>` sends the invoice's fields to `POST /invoices`
+(fields at [xmlvalid.com/docs/api#invoices](https://xmlvalid.com/docs/api#invoices)),
+writes the XRechnung, Peppol BIS, ZUGFeRD / Factur-X or France CTC document it gets
+back as `<number>.xml` and prints its check against the profile's official rules:
+
+```sh
+xmlvalid invoice invoice.json                         # RE-2026-0042.xml
+xmlvalid invoice invoice.json --pdf -o out/invoice.pdf  # ZUGFeRD PDF with the XML inside
+cat invoice.json | xmlvalid invoice -
+```
+
+The JSON is the invoice itself or `{ "invoice": … }`. `--pdf` writes a PDF/A-3 with
+the XML inside (profiles `zugferd`, `xrechnung` and `france`); `--rules-version`,
+`--fail-on-warnings`, `--format` and `--max-errors` work as for `validate`. Exit `0`
+when the invoice passes, `1` when it breaks a rule (it is still written), `2` when it
+could not be written. One invoice counts as one API validation.
+
 ## GitHub Actions
 
 ```yaml

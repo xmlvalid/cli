@@ -9,7 +9,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { fromApi, reportHtml } from './report.mjs';
 
-export const VERSION = '1.3.0';
+export const VERSION = '1.4.0';
 
 const DEFAULT_API = 'https://xmlvalid.com/api/v1';
 
@@ -20,6 +20,8 @@ const HELP = `xmlvalid ${VERSION}: validate XML with the xmlvalid.com API
 Usage:
   xmlvalid validate <file|glob>... [options]
   xmlvalid validate --url <address> [options]
+  xmlvalid invoice <invoice.json> [--pdf] [-o <file>]
+                            write an e-invoice from JSON and check it
   xmlvalid schemas          list catalog and saved schemas
   xmlvalid usage            this month's API validations
 
@@ -48,6 +50,13 @@ Options for validate:
                             buyer-reference=04011000-12346-97 (repeatable)
   -j, --concurrency <n>     documents validated at once (default 4)
       --max-errors <n>      errors printed per document (default 20)
+
+Options for invoice (the JSON is the invoice, or { "invoice": … }; fields
+at https://xmlvalid.com/docs/api#invoices):
+      --pdf                 write a ZUGFeRD / Factur-X PDF with the XML inside
+                            (zugferd, xrechnung and france profiles)
+  -o, --output <file>       where to write it (default <number>.xml or .pdf)
+      --rules-version, --fail-on-warnings, -f and --max-errors as for validate
 
 Global options:
       --api-key <key>       defaults to $XMLVALID_API_KEY
@@ -79,6 +88,7 @@ export function parseArgs(argv) {
         '-j': 'concurrency', '--concurrency': 'concurrency',
         '--max-errors': 'maxErrors',
         '--report': 'report',
+        '-o': 'output', '--output': 'output',
         '--fix-value': 'fixValue',
         '--api-key': 'apiKey',
         '--api-url': 'apiUrl',
@@ -88,6 +98,7 @@ export function parseArgs(argv) {
         '--fail-on-warnings': 'failOnWarnings',
         '--share': 'share',
         '--fix': 'fix',
+        '--pdf': 'pdf',
         '-h': 'help', '--help': 'help',
         '-v': 'version', '--version': 'version',
     };
@@ -341,6 +352,39 @@ export class Api {
         return json;
     }
 
+    /** Writes an e-invoice from JSON (POST /invoices) and waits for its check. */
+    async invoice(invoice, { pdf = false, rulesVersion = [] } = {}, { pollEvery = 2000, timeout = 10 * 60_000 } = {}) {
+        const body = { invoice, format: pdf ? 'pdf' : 'xml', wait: 30 };
+        if (rulesVersion.length > 0) body.rules_version = rulesVersion;
+        let { json, location } = await this.request('POST', '/invoices', body);
+        const deadline = Date.now() + timeout;
+
+        while (json.status === 'queued' || json.status === 'running') {
+            if (Date.now() > deadline) {
+                throw new CliError(`Gave up waiting for ${json.id}.`, EXIT.failure);
+            }
+            await sleep(pollEvery);
+            ({ json } = await this.request('GET', location ?? json.links.self));
+        }
+
+        return json;
+    }
+
+    /** The bytes of a document the API wrote (links.document). */
+    async document(validation) {
+        let response;
+        try {
+            response = await this.fetch(validation.links.document, { headers: { Authorization: `Bearer ${this.key}`, 'User-Agent': this.userAgent } });
+        } catch (error) {
+            throw new CliError(`Could not reach ${this.base}: ${error.cause?.message ?? error.message}`, EXIT.failure);
+        }
+        if (!response.ok) {
+            throw new CliError(`The invoice of ${validation.id} could not be fetched (HTTP ${response.status}).`, EXIT.failure);
+        }
+
+        return Buffer.from(await response.arrayBuffer());
+    }
+
     /** The document a run with fix=true fixed, as text. */
     async fixed(validation) {
         let response;
@@ -590,6 +634,50 @@ async function validateCommand(args, options, api, out, err = out) {
     return EXIT.invalid;
 }
 
+async function invoiceCommand(args, options, api, out) {
+    if (args.length !== 1) {
+        throw new CliError('invoice takes one JSON file, such as xmlvalid invoice invoice.json.');
+    }
+    let input;
+    try {
+        input = JSON.parse(args[0] === '-' ? await readStdin() : await readFile(args[0], 'utf8'));
+    } catch (error) {
+        throw new CliError(`${args[0]} is not JSON: ${error.message}`);
+    }
+    const invoice = input && typeof input.invoice === 'object' && input.invoice !== null ? input.invoice : input;
+
+    const validation = await api.invoice(invoice, { pdf: options.pdf, rulesVersion: options.rulesVersion });
+    let written = null;
+    if (validation.links?.document) {
+        written = options.output ?? validation.document?.name ?? `invoice.${options.pdf ? 'pdf' : 'xml'}`;
+        await writeFile(written, await api.document(validation));
+    }
+
+    if (options.format === 'json') {
+        out(JSON.stringify({ ...validation, written }, null, 2));
+    } else {
+        render({ file: written ?? args[0] }, validation, options).forEach((line) => out(line));
+        const meta = validation.invoice;
+        if (meta && options.format === 'text') {
+            out(`    ${[`${meta.profile} ${meta.syntax.toUpperCase()}`, validation.schema?.catalog, `${meta.totals.payable} ${meta.currency} payable`].filter(Boolean).join(', ')}`);
+            if (meta.ignored?.length > 0) out(`    fields not used: ${meta.ignored.join(', ')}`);
+        }
+        const sets = ruleSets([validation]);
+        if (sets.length > 0 && options.format === 'text') out(`Rules: ${sets.join(' · ')}`);
+    }
+
+    if (validation.result?.outcome === 'input' || !written) return EXIT.usage;
+
+    return passes(validation, options.failOnWarnings) ? EXIT.ok : EXIT.invalid;
+}
+
+async function readStdin() {
+    const chunks = [];
+    for await (const chunk of process.stdin) chunks.push(chunk);
+
+    return Buffer.concat(chunks).toString('utf8');
+}
+
 /** Runs the CLI; returns the exit code. `io` is replaceable for tests. */
 export async function main(argv, io = {}) {
     const out = io.out ?? ((s) => process.stdout.write(s + '\n'));
@@ -617,6 +705,8 @@ export async function main(argv, io = {}) {
         switch (command) {
             case 'validate':
                 return await validateCommand(args, options, api, out, err);
+            case 'invoice':
+                return await invoiceCommand(args, options, api, out);
             case 'schemas': {
                 const { json } = await api.request('GET', '/schemas');
                 for (const [group, list] of [['Your schemas', json.saved], ['Catalog', json.catalog]]) {
