@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { main, parseArgs, expandFiles, describe, passes, render } from '../bin/xmlvalid.mjs';
+import { main, parseArgs, expandFiles, describe, passes, render, userAgent, VERSION } from '../bin/xmlvalid.mjs';
 
 /** A stand-in for the API: answers each POST from `outcomes` by file name. */
 async function fakeApi(handler) {
@@ -454,4 +454,10 @@ test('names what kept an invoice from being written', async () => {
         await api.close();
         await rm(dir, { recursive: true, force: true });
     }
+});
+
+test('names a wrapper that runs it in its User-Agent', () => {
+    assert.equal(userAgent({}), `xmlvalid-cli/${VERSION}`);
+    assert.equal(userAgent({ XMLVALID_CLIENT: 'github-action' }), `xmlvalid-cli/${VERSION} github-action`);
+    assert.equal(userAgent({ XMLVALID_CLIENT: 'Evil\r\nX-Header: 1' }), `xmlvalid-cli/${VERSION} evilx-header1`);
 });

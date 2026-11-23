@@ -9,7 +9,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { fromApi, reportHtml } from './report.mjs';
 
-export const VERSION = '1.4.0';
+export const VERSION = '1.4.1';
 
 const DEFAULT_API = 'https://xmlvalid.com/api/v1';
 
@@ -265,12 +265,22 @@ export async function collectRules(main) {
     return files.map((file) => ({ path: path.relative(base, file).split(path.sep).join('/'), file }));
 }
 
+/**
+ * The CLI's User-Agent; a wrapper that runs it names itself in XMLVALID_CLIENT
+ * (the GitHub Action: "github-action"), so the API can tell them apart.
+ */
+export function userAgent(env = process.env) {
+    const client = String(env.XMLVALID_CLIENT ?? '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24);
+
+    return client ? `xmlvalid-cli/${VERSION} ${client}` : `xmlvalid-cli/${VERSION}`;
+}
+
 /** A small API client over fetch. */
 export class Api {
-    constructor({ key, base, userAgent = `xmlvalid-cli/${VERSION}`, fetchImpl = globalThis.fetch }) {
+    constructor({ key, base, userAgent: agent = userAgent(), fetchImpl = globalThis.fetch }) {
         this.key = key;
         this.base = base.replace(/\/+$/, '');
-        this.userAgent = userAgent;
+        this.userAgent = agent;
         this.fetch = fetchImpl;
     }
 
