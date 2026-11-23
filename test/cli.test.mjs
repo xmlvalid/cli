@@ -15,8 +15,8 @@ async function fakeApi(handler) {
         const body = Buffer.concat(chunks).toString('latin1');
         seen.push({ method: req.method, url: req.url, auth: req.headers.authorization, body });
         const [status, json, headers = {}] = await handler(req, body, seen.length);
-        res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
-        res.end(JSON.stringify(json));
+        res.writeHead(status, { 'Content-Type': typeof json === 'string' ? 'application/xml' : 'application/json', ...headers });
+        res.end(typeof json === 'string' ? json : JSON.stringify(json));
     });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const base = `http://127.0.0.1:${server.address().port}/api/v1`;
@@ -312,6 +312,39 @@ test('writes an HTML report of every document', async () => {
         await api.close();
         await rm(dir, { recursive: true, force: true });
     }
+});
+
+test('fixes documents, writes the fixed copy beside each and says what a fix needs', async () => {
+    const fix = {
+        status: 'fixed', reason: null, problems: [],
+        changes: [{ rule: 'BR-CL-04', text: 'cbc:DocumentCurrencyCode was eur: EUR' }],
+        asks: [{ key: 'buyer-reference', rule: 'BR-DE-15', label: 'Buyer reference (BT-10)', kind: 'text', suggested: null, options: null, answered: false }],
+        result: { valid: false, outcome: 'invalid', errors_total: 1, warnings_total: 0, errors: [], warnings: [] },
+    };
+    const api = await fakeApi((req) => req.url.endsWith('/fixed')
+        ? [200, '<Invoice>fixed</Invoice>']
+        : [201, { ...done('v1', { ...invalid, fix }), links: { self: '/api/v1/validations/v1', fixed: `http://${req.headers.host}/api/v1/validations/v1/fixed` } }]);
+    const dir = await workspace({ 'in/invoice.xml': '<Invoice/>' });
+    try {
+        const { code, out } = await run(['validate', 'in/invoice.xml', '--fix', '--fix-value', 'unit:Stk=H87'], { base: api.base, cwd: dir });
+        const post = api.seen.find((r) => r.method === 'POST');
+
+        assert.equal(code, 1, 'the exit code is that of the file as sent');
+        assert.match(post.body, /name="fix"\r\n\r\n1/);
+        assert.match(post.body, /name="fix_values\[unit:Stk\]"\r\n\r\nH87/);
+        assert.equal(await readFile(path.join(dir, 'in/invoice.fixed.xml'), 'utf8'), '<Invoice>fixed</Invoice>');
+        assert.match(out, /fixed: in\/invoice\.fixed\.xml \(1 change, 1 error left\)/);
+        assert.match(out, /\[BR-CL-04\] cbc:DocumentCurrencyCode was eur: EUR/);
+        assert.match(out, /needs --fix-value buyer-reference=…: Buyer reference \(BT-10\)/);
+    } finally {
+        await api.close();
+        await rm(dir, { recursive: true, force: true });
+    }
+
+    await assert.rejects(Promise.resolve().then(() => parseArgs(['validate', 'a.xml', '--fix-value', 'nokey'])), /takes key=value/);
+    const { code, err } = await run(['validate', 'a.xml', '--fix-value', 'a=b'], { base: 'http://127.0.0.1:9/api/v1' });
+    assert.equal(code, 2);
+    assert.match(err, /--fix-value goes with --fix/);
 });
 
 test('shares one report link for the whole run, and carries on without one', async () => {

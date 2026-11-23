@@ -9,7 +9,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { fromApi, reportHtml } from './report.mjs';
 
-export const VERSION = '1.2.0';
+export const VERSION = '1.3.0';
 
 const DEFAULT_API = 'https://xmlvalid.com/api/v1';
 
@@ -24,7 +24,7 @@ Usage:
   xmlvalid usage            this month's API validations
 
 Options for validate:
-  -s, --schema <name>       a catalog slug (atom-1.0), saved schema (my-12), or
+  -s, --schema <name>       a catalog slug (atom-1.0), saved schema (@orders-v3), or
                             auto for the profile each e-invoice names
       --schema-file <path>  an XSD, DTD or RelaxNG file sent with each document
       --doctype             validate against each document's own DOCTYPE
@@ -40,6 +40,12 @@ Options for validate:
                             links to each rule (open it and save it as PDF)
       --share               also make a public link to that report, open for
                             30 days (Pro)
+      --fix                 fix what the validator can fix and write
+                            <name>.fixed.xml beside each file (Pro); the exit
+                            code is still that of the files as sent
+      --fix-value <key=value>
+                            a value a fix asks for, such as
+                            buyer-reference=04011000-12346-97 (repeatable)
   -j, --concurrency <n>     documents validated at once (default 4)
       --max-errors <n>      errors printed per document (default 20)
 
@@ -61,7 +67,7 @@ class CliError extends Error {
 
 /** Parses argv into { command, args, options }. */
 export function parseArgs(argv) {
-    const options = { url: [], rulesVersion: [], format: 'text', concurrency: 4, maxErrors: 20 };
+    const options = { url: [], rulesVersion: [], fixValue: [], format: 'text', concurrency: 4, maxErrors: 20 };
     const args = [];
     const takes = {
         '-s': 'schema', '--schema': 'schema',
@@ -73,6 +79,7 @@ export function parseArgs(argv) {
         '-j': 'concurrency', '--concurrency': 'concurrency',
         '--max-errors': 'maxErrors',
         '--report': 'report',
+        '--fix-value': 'fixValue',
         '--api-key': 'apiKey',
         '--api-url': 'apiUrl',
     };
@@ -80,6 +87,7 @@ export function parseArgs(argv) {
         '--doctype': 'doctype',
         '--fail-on-warnings': 'failOnWarnings',
         '--share': 'share',
+        '--fix': 'fix',
         '-h': 'help', '--help': 'help',
         '-v': 'version', '--version': 'version',
     };
@@ -101,6 +109,11 @@ export function parseArgs(argv) {
             const key = takes[arg];
             if (key === 'url' || key === 'rulesVersion') {
                 options[key].push(value);
+            } else if (key === 'fixValue') {
+                if (!/^[^=]+=/.test(value)) {
+                    throw new CliError(`${arg} takes key=value, such as buyer-reference=04011000-12346-97.`);
+                }
+                options.fixValue.push(value);
             } else if (key === 'concurrency' || key === 'maxErrors') {
                 options[key] = Number.parseInt(value, 10);
                 if (!Number.isInteger(options[key]) || options[key] < (key === 'maxErrors' ? 0 : 1)) {
@@ -282,7 +295,7 @@ export class Api {
         if (!response.ok) {
             const message = json?.error?.message ?? `HTTP ${response.status}`;
             const code = json?.error?.code;
-            const fatal = ['unauthenticated', 'quota_exceeded', 'unknown_schema', 'invalid_schema', 'invalid_rules', 'too_large', 'invalid_request', 'invalid_url', 'missing_document', 'rules_version_mismatch'];
+            const fatal = ['unauthenticated', 'quota_exceeded', 'test_quota_exceeded', 'unknown_schema', 'invalid_schema', 'invalid_rules', 'too_large', 'invalid_request', 'invalid_url', 'missing_document', 'rules_version_mismatch', 'plan_limit'];
             throw new CliError(message, code && fatal.includes(code) ? EXIT.usage : EXIT.failure);
         }
 
@@ -290,7 +303,7 @@ export class Api {
     }
 
     /** Sends one document and waits for the finished validation. */
-    async validate({ file, url, schema, schemaFile, doctype, rules, rulesVersion }, { pollEvery = 2000, timeout = 20 * 60_000 } = {}) {
+    async validate({ file, url, schema, schemaFile, doctype, rules, rulesVersion, fix = false, fixValues = [] }, { pollEvery = 2000, timeout = 20 * 60_000 } = {}) {
         const form = new FormData();
         if (file) {
             form.append('document', await openAsBlob(file), path.basename(file));
@@ -305,6 +318,13 @@ export class Api {
             form.append('rules_path[]', rule.path);
         }
         for (const pin of rulesVersion ?? []) form.append('rules_version[]', pin);
+        if (fix) {
+            form.append('fix', '1');
+            for (const pair of fixValues) {
+                const at = pair.indexOf('=');
+                form.append(`fix_values[${pair.slice(0, at)}]`, pair.slice(at + 1));
+            }
+        }
         form.append('wait', '30');
 
         let { json, location } = await this.request('POST', '/validations', form);
@@ -320,6 +340,50 @@ export class Api {
 
         return json;
     }
+
+    /** The document a run with fix=true fixed, as text. */
+    async fixed(validation) {
+        let response;
+        try {
+            response = await this.fetch(validation.links.fixed, { headers: { Authorization: `Bearer ${this.key}`, 'User-Agent': this.userAgent } });
+        } catch (error) {
+            throw new CliError(`Could not reach ${this.base}: ${error.cause?.message ?? error.message}`, EXIT.failure);
+        }
+        if (!response.ok) {
+            throw new CliError(`The fixed document of ${validation.id} could not be fetched (HTTP ${response.status}).`, EXIT.failure);
+        }
+
+        return response.text();
+    }
+}
+
+/** Where the fixed copy of a document goes: beside a file, in the working folder for a URL. */
+export function fixedPath(item) {
+    const source = item.file ?? (path.basename(new URL(item.url).pathname) || 'document.xml');
+    const parsed = path.parse(source);
+
+    return path.join(item.file ? parsed.dir : '', `${parsed.name}.fixed.xml`);
+}
+
+/** What --fix did to one document, as lines for the text and GitHub formats. */
+export function fixLines(item, validation, written) {
+    const fix = validation.result?.fix;
+    if (!fix) return [];
+    const lines = [];
+    if (written) {
+        const after = fix.result;
+        const verdict = !after ? '' : after.valid ? (after.warnings_total ? `, now valid with ${plural(after.warnings_total, 'warning')}` : ', now valid') : `, ${plural(after.errors_total, 'error')} left`;
+        lines.push(`  fixed: ${written} (${plural(fix.changes.length, 'change')}${verdict})`);
+        for (const change of fix.changes) lines.push(`    ${change.rule ? `[${change.rule}] ` : ''}${change.text}`);
+    } else if (fix.reason) {
+        lines.push(`  not fixed: ${fix.reason}`);
+    }
+    for (const ask of fix.asks.filter((a) => !a.answered)) {
+        lines.push(`  needs --fix-value ${ask.key}=…: ${ask.label}${ask.suggested ? ` (perhaps ${ask.suggested})` : ''}${ask.options ? ` (one of ${ask.options.join(', ')})` : ''}`);
+    }
+    for (const problem of fix.problems) lines.push(`  refused ${problem.key}: ${problem.text}`);
+
+    return lines;
 }
 
 /** Runs `worker` over `items` with at most `limit` at once, keeping the order. */
@@ -455,6 +519,9 @@ async function validateCommand(args, options, api, out, err = out) {
     if (!['text', 'json', 'github'].includes(options.format)) {
         throw new CliError('--format is text, json or github.');
     }
+    if (options.fixValue.length && !options.fix) {
+        throw new CliError('--fix-value goes with --fix.');
+    }
 
     const rules = options.rules ? await collectRules(options.rules) : null;
     const files = await expandFiles(args);
@@ -464,9 +531,15 @@ async function validateCommand(args, options, api, out, err = out) {
     }
 
     const validations = await pool(items, options.concurrency, async (item) => {
-        const validation = await api.validate({ ...item, schema: options.schema, schemaFile: options.schemaFile, doctype: options.doctype, rules, rulesVersion: options.rulesVersion });
+        const validation = await api.validate({ ...item, schema: options.schema, schemaFile: options.schemaFile, doctype: options.doctype, rules, rulesVersion: options.rulesVersion, fix: options.fix, fixValues: options.fixValue });
+        let written = null;
+        if (options.fix && validation.links?.fixed) {
+            written = fixedPath(item);
+            await writeFile(written, await api.fixed(validation));
+            item.fixed = written;
+        }
         if (options.format !== 'json') {
-            out(render(item, validation, options).join('\n'));
+            out([...render(item, validation, options), ...fixLines(item, validation, written)].join('\n'));
         }
 
         return validation;

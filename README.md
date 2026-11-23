@@ -15,13 +15,13 @@ xmlvalid validate "out/**/*.xml" --schema auto          # Peppol, XRechnung, Fac
 xmlvalid validate "feeds/**/*.atom" --schema atom-1.0 --format github
 xmlvalid validate order.xml --schema-file schemas/order.xsd
 xmlvalid validate --url https://example.com/sitemap.xml --schema sitemap-0.9
-xmlvalid schemas     # catalog slugs and your saved schemas (my-12)
+xmlvalid schemas     # catalog slugs and your saved schemas (@orders-v3)
 xmlvalid usage
 ```
 
 Each document counts as one API validation (Free: 100 a month, Pro: 10,000).
 A schema that spans several files can be saved once in the dashboard and used as
-`--schema my-12`.
+`--schema @orders-v3`.
 
 A `.zip` is validated document by document on the server (its XML files, against the
 schema) and an `.epub` file by file against its own schemas; the documents are listed
@@ -34,7 +34,7 @@ the PDF around it are listed as `[PDF-…]` findings.
 
 | Option | |
 |---|---|
-| `-s, --schema <name>` | a catalog slug (`atom-1.0`), a saved schema (`my-12`), or `auto` for the profile each e-invoice names (Peppol, XRechnung, French, KSeF…) |
+| `-s, --schema <name>` | a catalog slug (`atom-1.0`), a saved schema (`@orders-v3`), or `auto` for the profile each e-invoice names (Peppol, XRechnung, French, KSeF…) |
 | `--schema-file <path>` | one XSD, DTD or RelaxNG file sent with each document |
 | `--rules <path>` | your own Schematron (`.sch`) file, run after the schema check; findings show their rule id |
 | `--rules-version <set@version>` | fail (exit 2) when a catalog profile's business rules are at another release, such as `peppol-bis-3-ubl@3.0.21`; repeat for several. The rule sets and releases used are printed under the summary |
@@ -44,6 +44,8 @@ the PDF around it are listed as `[PDF-…]` findings.
 | `--fail-on-warnings` | treat warnings as failures |
 | `--report <file.html>` | also write an HTML report of every document, with links to each rule (open it and print it to save a PDF) |
 | `--share` | also make a public link to that report, open for 30 days (Pro); printed at the end and added to the GitHub job summary |
+| `--fix` | fix what the validator's "Fix and check again" fixes (date and amount formats, code case, specification identifiers, element order, scheme names, VAT prefixes…) and write `<name>.fixed.xml` beside each file, with the changes and the fixed file's own verdict printed under it (Pro, UBL and CII invoices checked against a catalog profile). The exit code stays that of the files as sent |
+| `--fix-value <key=value>` | a value a fix asks for (printed as "needs --fix-value …"), such as `buyer-reference=04011000-12346-97`; repeatable |
 | `-j, --concurrency <n>` | documents validated at once, default 4 |
 | `--max-errors <n>` | errors printed per document, default 20 |
 | `--api-key`, `--api-url` | default to `XMLVALID_API_KEY`, `XMLVALID_API_URL` |
